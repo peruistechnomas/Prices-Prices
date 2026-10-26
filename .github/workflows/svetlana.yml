@@ -1,0 +1,25 @@
+name: Svetlana Bot Auto
+
+on:
+  schedule:
+    - cron: '0 * * * *'  # Se ejecuta automáticamente cada 1 hora exacta
+  workflow_dispatch:
+
+jobs:
+  run-svetlana:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+          uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Install dependencies
+        run: |
+          pip install requests beautifulsoup4
+
+      - name: Run bot script
+        run: python svetlana.py
