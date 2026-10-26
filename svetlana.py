@@ -3,7 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import json
 import os
-import time
+from playwright.sync_api import sync_playwright
 
 TELEGRAM_TOKEN = "8877774720:AAGZDgSvjTDU1veqxA1wsrHxDSM3J5QC37M"
 CHAT_ID = "1301227407"
@@ -37,48 +37,63 @@ def save_last_prices(prices):
     with open(STATE_FILE, "w") as f:
         json.dump(prices, f, indent=4)
 
-def get_ripley_price(url):
-    """Obtiene el precio de Ripley consultando su endpoint interno usando el SKU del producto."""
+def get_ripley_price_with_browser(url):
+    """Usa un navegador real (Playwright) para extraer el precio de Ripley sin bloqueos."""
+    found_price = None
     try:
-        # Extraer el SKU de la URL (ej: 2005364407890)
-        match_sku = re.search(r'-(\d{10,15})(?:\?|$|-)', url)
-        if not match_sku:
-            return None
-        sku = match_sku.group(1)
-        
-        # Endpoint de la API interna de Ripley Perú
-        api_url = f"https://simple.ripley.com.pe/api/v2/products/{sku}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-            "Accept": "application/json",
-            "Referer": url
-        }
-        
-        response = requests.get(api_url, headers=headers, timeout=15)
-        if response.status_code == 200:
-            data = response.json()
-            # Buscar el precio internet o precio oferta en la estructura JSON
-            prices_dict = data.get("prices", {})
-            for key in ["formatted_card_price", "formatted_offer_price", "formatted_inet_price", "formatted_normal_price"]:
-                val_str = prices_dict.get(key)
-                if val_str:
-                    # Limpiar formato ej: "S/ 119.99" -> 119.99
-                    clean_match = re.search(r'([\d.,]+)', val_str.replace(',', ''))
-                    if clean_match:
-                        val = float(clean_match.group(1))
-                        if 10 <= val <= 2000:
-                            return val
+        with sync_playwright() as p:
+            # Lanzar un navegador Chromium en segundo plano (headless)
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page(
+                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+            )
+            page.goto(url, timeout=30000)
             
-            # Si no vino formateado, buscar en campos numéricos directos
-            for key in ["card_price", "offer_price", "inet_price", "normal_price"]:
-                val = prices_dict.get(key)
-                if val and isinstance(val, (int, float)) and val > 0:
-                    return float(val)
-                    
+            # Esperar a que cargue algún elemento de precio en la página
+            try:
+                page.wait_for_selector('.product-price, .internet-price, [class*="price"]', timeout=10000)
+            except Exception:
+                pass # Si no espera el selector exacto, igual leemos el HTML renderizado
+            
+            html_content = page.content()
+            browser.close()
+            
+            # Buscar el precio en el HTML ya renderizado por el navegador
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Buscar en etiquetas comunes de precios de Ripley
+            price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal|card', re.I))
+            for tag in price_tags:
+                match = re.search(r'S/\s*([\d.,]+)', tag.text)
+                if match:
+                    val_str = match.group(1).replace(',', '')
+                    try:
+                        val = float(val_str)
+                        if 10 <= val <= 2000:
+                            found_price = val
+                            break
+                    except ValueError:
+                        continue
+            
+            # Respaldo general si las clases cambiaron
+            if not found_price:
+                all_text = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                for elem in all_text:
+                    match = re.search(r'S/\s*([\d.,]+)', elem)
+                    if match:
+                        val_str = match.group(1).replace(',', '')
+                        try:
+                            val = float(val_str)
+                            if 10 <= val <= 2000:
+                                found_price = val
+                                break
+                        except ValueError:
+                            continue
+                            
     except Exception as e:
-        print(f"Error fetching Ripley API: {e}")
-    
-    return None
+        print(f"Error with Playwright for Ripley: {e}")
+        
+    return found_price
 
 def check_prices():
     headers = {
@@ -135,10 +150,8 @@ def check_prices():
         print(f"Checking: {prod['name']}...")
         
         if prod["store"] == "ripley":
-            # Usar método directo de API para Ripley
-            found_price = get_ripley_price(prod["url"])
+            found_price = get_ripley_price_with_browser(prod["url"])
         else:
-            # Método tradicional para Falabella
             try:
                 response = requests.get(prod['url'], headers=headers, timeout=15)
                 if response.status_code == 200:
@@ -202,8 +215,6 @@ def check_prices():
                 print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
         else:
             print(f"Could not extract price for {prod['name']}")
-            
-        time.sleep(2)
             
     save_last_prices(updated_prices)
 
