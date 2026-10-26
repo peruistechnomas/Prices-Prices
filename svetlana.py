@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import time
 from bs4 import BeautifulSoup
 import requests
@@ -16,6 +17,9 @@ def enviar_alerta(mensaje):
   except Exception as e:
     print(f"Error al enviar mensaje: {e}")
 
+
+# --- MENSAJE DE PRUEBA ---
+enviar_alerta("🤖 ¡Hola! Mensaje de prueba de Svetlana funcionando al 100%.")
 
 productos = [
     {
@@ -112,8 +116,6 @@ for item in productos:
           precio_actual = tag_precio.get_text(strip=True)
 
       if precio_actual:
-        import re
-
         nums = re.findall(r"\d{2,4}\.\d{2}", precio_actual)
         if not nums:
           nums = re.findall(r"\d{2,4}", precio_actual)
