@@ -3,6 +3,7 @@ from bs4 import BeautifulSoup
 import re
 import json
 import os
+import time
 
 TELEGRAM_TOKEN = "8877774720:AAGZDgSvjTDU1veqxA1wsrHxDSM3J5QC37M"
 CHAT_ID = "1301227407"
@@ -81,32 +82,21 @@ def check_prices():
     
     for prod in products:
         prod_id = prod["id"]
-        try:
-            print(f"Checking: {prod['name']}...")
-            response = requests.get(prod['url'], headers=headers, timeout=15)
-            
-            if response.status_code == 200:
-                soup = BeautifulSoup(response.text, 'html.parser')
-                found_price = None
+        found_price = None
+        
+        # Intentamos hasta 2 veces por producto en caso de bloqueos temporales de Ripley
+        for attempt in range(2):
+            try:
+                print(f"Checking: {prod['name']} (Attempt {attempt + 1})...")
+                response = requests.get(prod['url'], headers=headers, timeout=15)
                 
-                price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
-                
-                for tag in price_tags:
-                    match = re.search(r'S/\s*([\d.,]+)', tag.text)
-                    if match:
-                        val_str = match.group(1).replace(',', '')
-                        try:
-                            val = float(val_str)
-                            if 20 <= val <= 2000:
-                                found_price = val
-                                break
-                        except ValueError:
-                            continue
-                
-                if not found_price:
-                    price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
-                    for elem in price_elements:
-                        match = re.search(r'S/\s*([\d.,]+)', elem)
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.text, 'html.parser')
+                    
+                    price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
+                    
+                    for tag in price_tags:
+                        match = re.search(r'S/\s*([\d.,]+)', tag.text)
                         if match:
                             val_str = match.group(1).replace(',', '')
                             try:
@@ -116,42 +106,59 @@ def check_prices():
                                     break
                             except ValueError:
                                 continue
-                
-                if found_price:
-                    old_price = last_prices.get(prod_id)
-                    updated_prices[prod_id] = found_price
                     
-                    product_link = f"[Ver producto]({prod['url']})"
+                    if not found_price:
+                        price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                        for elem in price_elements:
+                            match = re.search(r'S/\s*([\d.,]+)', elem)
+                            if match:
+                                val_str = match.group(1).replace(',', '')
+                                try:
+                                    val = float(val_str)
+                                    if 20 <= val <= 2000:
+                                        found_price = val
+                                        break
+                                except ValueError:
+                                    continue
                     
-                    if old_price is None:
-                        send_alert(
-                            f"Kevin, estos son los precios:\n\n"
-                            f"📦 *{prod['name']}*\n"
-                            f"💰 S/ {found_price:.2f}\n"
-                            f"🔗 {product_link}"
-                        )
-                    elif found_price != old_price:
-                        trend = "📉 ¡Bajó!" if found_price < old_price else "📈 ¡Subió!"
-                        message = (
-                            f"Kevin, cambiaron los precios:\n\n"
-                            f"📦 *{prod['name']}*\n"
-                            f"🔄 Antes: S/ {old_price:.2f}\n"
-                            f"💰 Ahora: S/ {found_price:.2f} {trend}\n"
-                            f"🔗 {product_link}"
-                        )
-                        if found_price <= prod['price_limit']:
-                            message += f"\n\n🎯 *¡Llegó a tu precio objetivo!*"
-                        send_alert(message)
-                    else:
-                        print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
+                    if found_price:
+                        break # Si encontró el precio, salimos del bucle de intentos
                 else:
-                    print(f"Could not extract price for {prod['name']}")
-                    
-            else:
-                print(f"HTTP error {response.status_code} for {prod['name']}")
+                    print(f"HTTP error {response.status_code} for {prod['name']}")
                 
-        except Exception as e:
-            print(f"Error checking {prod['name']}: {e}")
+                time.sleep(2) # Pausa corta entre intentos para evitar bloqueos
+            except Exception as e:
+                print(f"Error checking {prod['name']}: {e}")
+                
+        if found_price:
+            old_price = last_prices.get(prod_id)
+            updated_prices[prod_id] = found_price
+            
+            product_link = f"[Ver producto]({prod['url']})"
+            
+            if old_price is None:
+                send_alert(
+                    f"Kevin, estos son los precios:\n\n"
+                    f"📦 *{prod['name']}*\n"
+                    f"💰 S/ {found_price:.2f}\n"
+                    f"🔗 {product_link}"
+                )
+            elif found_price != old_price:
+                trend = "📉 ¡Bajó!" if found_price < old_price else "📈 ¡Subió!"
+                message = (
+                    f"Kevin, cambiaron los precios:\n\n"
+                    f"📦 *{prod['name']}*\n"
+                    f"🔄 Antes: S/ {old_price:.2f}\n"
+                    f"💰 Ahora: S/ {found_price:.2f} {trend}\n"
+                    f"🔗 {product_link}"
+                )
+                if found_price <= prod['price_limit']:
+                    message += f"\n\n🎯 *💍¡Llegó a tu precio objetivo!*"
+                send_alert(message)
+            else:
+                print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
+        else:
+            print(f"Could not extract price for {prod['name']} after attempts")
             
     save_last_prices(updated_prices)
 
