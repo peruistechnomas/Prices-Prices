@@ -1,7 +1,7 @@
 import requests
 from bs4 import BeautifulSoup
 
-TELEGRAM_TOKEN = "8877774720:AAEvlIkejUrYW1wZNcwf95o0dm_LxWhW0Iw"
+TELEGRAM_TOKEN = "8877774720:AAGZDgSvjTDU1veqxA1wsrHxDSM3J5QC37M"
 CHAT_ID = "1301227407"
 
 def enviar_alerta(mensaje):
