@@ -3,7 +3,6 @@ from bs4 import BeautifulSoup
 import re
 import json
 import os
-from playwright.sync_api import sync_playwright
 
 TELEGRAM_TOKEN = "8877774720:AAGZDgSvjTDU1veqxA1wsrHxDSM3J5QC37M"
 CHAT_ID = "1301227407"
@@ -37,46 +36,6 @@ def save_last_prices(prices):
     with open(STATE_FILE, "w") as f:
         json.dump(prices, f, indent=4)
 
-def get_ripley_price_with_browser(url):
-    """Usa un navegador real (Playwright) y busca cualquier coincidencia de precio S/ en la página."""
-    found_price = None
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(
-                user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
-            )
-            page.goto(url, timeout=40000)
-            
-            # Damos unos segundos extra para que carguen los scripts dinámicos de precios de Ripley
-            page.wait_for_timeout(3000)
-            
-            html_content = page.content()
-            browser.close()
-            
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
-            # Buscar cualquier texto en la página que tenga el formato de precio peruano "S/" seguido de números
-            price_matches = soup.find_all(string=re.compile(r'S/\s*[\d.,]+'))
-            
-            for text_elem in price_matches:
-                match = re.search(r'S/\s*([\d.,]+)', text_elem)
-                if match:
-                    val_str = match.group(1).replace(',', '')
-                    try:
-                        val = float(val_str)
-                        # Filtramos un rango lógico de precios para ropa (entre 15 y 2000 soles)
-                        if 15 <= val <= 2000:
-                            found_price = val
-                            break
-                    except ValueError:
-                        continue
-                        
-    except Exception as e:
-        print(f"Error with Playwright for Ripley: {e}")
-        
-    return found_price
-
 def check_prices():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
@@ -84,41 +43,13 @@ def check_prices():
         "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     }
     
+    # Lista de productos de Falabella (puedes agregar más aquí cuando quieras)
     products = [
         {
             "id": "la_martina_falabella",
             "name": "Sweater La Martina (Falabella)",
             "url": "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414096",
-            "price_limit": 200.00,
-            "store": "falabella"
-        },
-        {
-            "id": "pantalon_spavaldi",
-            "name": "Pantalon Spavaldi Ezio (Ripley)",
-            "url": "https://simple.ripley.com.pe/pantalon-hombre-spavaldi-ezio-2005364407890?color_80=Arena&s=mdco&pos=9&catPos=9&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 120.00,
-            "store": "ripley"
-        },
-        {
-            "id": "casaca_spavaldi",
-            "name": "Casaca Spavaldi Beata (Ripley)",
-            "url": "https://simple.ripley.com.pe/casaca-hombre-spavaldi-beata-2005370113310?color_80=Caf%C3%A9&s=mdco&pos=13&catPos=13&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 150.00,
-            "store": "ripley"
-        },
-        {
-            "id": "polo_lino_spavaldi",
-            "name": "Polo Manga Corta Lino Spavaldi (Ripley)",
-            "url": "https://simple.ripley.com.pe/polo-manga-corta-lino-spavaldi-azul-marino-2005370112030?color_80=Blanco&s=mdco&pos=32&catPos=32&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 80.00,
-            "store": "ripley"
-        },
-        {
-            "id": "polo_algodon_marquis",
-            "name": "Polo Manga Corta Algodon Marquis (Ripley)",
-            "url": "https://simple.ripley.com.pe/polo-manga-corta-algodon-hombre-marquis-2005373327929?color_80=Caf%C3%A9&s=mdco&pos=13&catPos=61&p=2&ps=48&cat=marquis_casual_homb&orig=PLP&prodNavFullCategory=Hombre+%3E+Marcas+casuales+%3E+Marquis",
-            "price_limit": 70.00,
-            "store": "ripley"
+            "price_limit": 200.00
         }
     ]
     
@@ -131,17 +62,28 @@ def check_prices():
         
         print(f"Checking: {prod['name']}...")
         
-        if prod["store"] == "ripley":
-            found_price = get_ripley_price_with_browser(prod["url"])
-        else:
-            try:
-                response = requests.get(prod['url'], headers=headers, timeout=15)
-                if response.status_code == 200:
-                    soup = BeautifulSoup(response.text, 'html.parser')
-                    price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
-                    
-                    for tag in price_tags:
-                        match = re.search(r'S/\s*([\d.,]+)', tag.text)
+        try:
+            response = requests.get(prod['url'], headers=headers, timeout=15)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
+                
+                for tag in price_tags:
+                    match = re.search(r'S/\s*([\d.,]+)', tag.text)
+                    if match:
+                        val_str = match.group(1).replace(',', '')
+                        try:
+                            val = float(val_str)
+                            if 20 <= val <= 2000:
+                                found_price = val
+                                break
+                        except ValueError:
+                            continue
+                
+                if not found_price:
+                    price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                    for elem in price_elements:
+                        match = re.search(r'S/\s*([\d.,]+)', elem)
                         if match:
                             val_str = match.group(1).replace(',', '')
                             try:
@@ -151,22 +93,8 @@ def check_prices():
                                     break
                             except ValueError:
                                 continue
-                    
-                    if not found_price:
-                        price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
-                        for elem in price_elements:
-                            match = re.search(r'S/\s*([\d.,]+)', elem)
-                            if match:
-                                val_str = match.group(1).replace(',', '')
-                                try:
-                                    val = float(val_str)
-                                    if 20 <= val <= 2000:
-                                        found_price = val
-                                        break
-                                except ValueError:
-                                    continue
-            except Exception as e:
-                print(f"Error checking Falabella {prod['name']}: {e}")
+        except Exception as e:
+            print(f"Error checking {prod['name']}: {e}")
                 
         if found_price:
             old_price = last_prices.get(prod_id)
