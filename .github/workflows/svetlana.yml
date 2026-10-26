@@ -21,8 +21,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4 playwright
-          playwright install chromium
+          pip install requests beautifulsoup4
 
       - name: Run bot script
         run: |
