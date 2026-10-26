@@ -35,15 +35,56 @@ def load_last_prices():
 def save_last_prices(prices):
     """Saves current prices to the local file for future runs."""
     with open(STATE_FILE, "w") as f:
-            json.dump(prices, f, indent=4)
+        json.dump(prices, f, indent=4)
+
+def get_ripley_price(url):
+    """Obtiene el precio de Ripley consultando su endpoint interno usando el SKU del producto."""
+    try:
+        # Extraer el SKU de la URL (ej: 2005364407890)
+        match_sku = re.search(r'-(\d{10,15})(?:\?|$|-)', url)
+        if not match_sku:
+            return None
+        sku = match_sku.group(1)
+        
+        # Endpoint de la API interna de Ripley Perú
+        api_url = f"https://simple.ripley.com.pe/api/v2/products/{sku}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+            "Accept": "application/json",
+            "Referer": url
+        }
+        
+        response = requests.get(api_url, headers=headers, timeout=15)
+        if response.status_code == 200:
+            data = response.json()
+            # Buscar el precio internet o precio oferta en la estructura JSON
+            prices_dict = data.get("prices", {})
+            for key in ["formatted_card_price", "formatted_offer_price", "formatted_inet_price", "formatted_normal_price"]:
+                val_str = prices_dict.get(key)
+                if val_str:
+                    # Limpiar formato ej: "S/ 119.99" -> 119.99
+                    clean_match = re.search(r'([\d.,]+)', val_str.replace(',', ''))
+                    if clean_match:
+                        val = float(clean_match.group(1))
+                        if 10 <= val <= 2000:
+                            return val
+            
+            # Si no vino formateado, buscar en campos numéricos directos
+            for key in ["card_price", "offer_price", "inet_price", "normal_price"]:
+                val = prices_dict.get(key)
+                if val and isinstance(val, (int, float)) and val > 0:
+                    return float(val)
+                    
+    except Exception as e:
+        print(f"Error fetching Ripley API: {e}")
+    
+    return None
 
 def check_prices():
-    # Cabeceras simulando un navegador real de escritorio con contexto de Perú
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        "Accept-Language": "es-PE,es;q=0.9,en-US;q=0.8,en;q=0.7",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
-        "Referer": "https://simple.ripley.com.pe/"
+        "Accept-Language": "es-PE,es;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     }
     
     products = [
@@ -51,31 +92,36 @@ def check_prices():
             "id": "la_martina_falabella",
             "name": "Sweater La Martina (Falabella)",
             "url": "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414096",
-            "price_limit": 200.00
+            "price_limit": 200.00,
+            "store": "falabella"
         },
         {
             "id": "pantalon_spavaldi",
             "name": "Pantalon Spavaldi Ezio (Ripley)",
             "url": "https://simple.ripley.com.pe/pantalon-hombre-spavaldi-ezio-2005364407890?color_80=Arena&s=mdco&pos=9&catPos=9&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 120.00
+            "price_limit": 120.00,
+            "store": "ripley"
         },
         {
             "id": "casaca_spavaldi",
             "name": "Casaca Spavaldi Beata (Ripley)",
             "url": "https://simple.ripley.com.pe/casaca-hombre-spavaldi-beata-2005370113310?color_80=Caf%C3%A9&s=mdco&pos=13&catPos=13&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 150.00
+            "price_limit": 150.00,
+            "store": "ripley"
         },
         {
             "id": "polo_lino_spavaldi",
             "name": "Polo Manga Corta Lino Spavaldi (Ripley)",
             "url": "https://simple.ripley.com.pe/polo-manga-corta-lino-spavaldi-azul-marino-2005370112030?color_80=Blanco&s=mdco&pos=32&catPos=32&p=1&ps=39&orig=PSP&searchTerm=Spavaldi",
-            "price_limit": 80.00
+            "price_limit": 80.00,
+            "store": "ripley"
         },
         {
             "id": "polo_algodon_marquis",
             "name": "Polo Manga Corta Algodon Marquis (Ripley)",
             "url": "https://simple.ripley.com.pe/polo-manga-corta-algodon-hombre-marquis-2005373327929?color_80=Caf%C3%A9&s=mdco&pos=13&catPos=61&p=2&ps=48&cat=marquis_casual_homb&orig=PLP&prodNavFullCategory=Hombre+%3E+Marcas+casuales+%3E+Marquis",
-            "price_limit": 70.00
+            "price_limit": 70.00,
+            "store": "ripley"
         }
     ]
     
@@ -86,75 +132,46 @@ def check_prices():
         prod_id = prod["id"]
         found_price = None
         
-        for attempt in range(3):
+        print(f"Checking: {prod['name']}...")
+        
+        if prod["store"] == "ripley":
+            # Usar método directo de API para Ripley
+            found_price = get_ripley_price(prod["url"])
+        else:
+            # Método tradicional para Falabella
             try:
-                print(f"Checking: {prod['name']} (Attempt {attempt + 1})...")
-                response = requests.get(prod['url'], headers=headers, timeout=20)
-                
+                response = requests.get(prod['url'], headers=headers, timeout=15)
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
+                    price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
                     
-                    # 1. Búsqueda específica en etiquetas de precios de Ripley (por clases o atributos de precio internet)
-                    # Ripley suele renderizar el precio internet bajo contenedores específicos o scripts incrustados (JSON-LD)
-                    
-                    # Intentar buscar en scripts JSON-LD de la página (la forma más infalible en e-commerce)
-                    json_scripts = soup.find_all('script', type='application/ld+json')
-                    for script in json_scripts:
-                        try:
-                            data = json.loads(script.string)
-                            if isinstance(data, dict) and 'offers' in data:
-                                offers = data['offers']
-                                if isinstance(offers, dict) and 'price' in offers:
-                                    found_price = float(offers['price'])
-                                    break
-                                elif isinstance(offers, list) and len(offers) > 0 and 'price' in offers[0]:
-                                    found_price = float(offers[0]['price'])
-                                    break
-                        except Exception:
-                            continue
-                    
-                    if found_price:
-                        break
-
-                    # 2. Búsqueda por clases universales de precio en el HTML de Ripley
-                    price_elements = soup.find_all(['span', 'div', 'li'], class_=re.compile(r'product-price|internet|price|value', re.I))
-                    for elem in price_elements:
-                        match = re.search(r'S/\s*([\d.,]+)', elem.text)
+                    for tag in price_tags:
+                        match = re.search(r'S/\s*([\d.,]+)', tag.text)
                         if match:
                             val_str = match.group(1).replace(',', '')
                             try:
                                 val = float(val_str)
-                                if 10 <= val <= 2000:
+                                if 20 <= val <= 2000:
                                     found_price = val
                                     break
                             except ValueError:
                                 continue
                     
-                    if found_price:
-                        break
-
-                    # 3. Respaldo general buscando cualquier etiqueta con S/
-                    all_text_prices = soup.find_all(string=re.compile(r'S/\s*\d+'))
-                    for elem in all_text_prices:
-                        match = re.search(r'S/\s*([\d.,]+)', elem)
-                        if match:
-                            val_str = match.group(1).replace(',', '')
-                            try:
-                                val = float(val_str)
-                                if 10 <= val <= 2000:
-                                    found_price = val
-                                    break
-                            except ValueError:
-                                continue
-                                
-                    if found_price:
-                        break
-                else:
-                    print(f"HTTP error {response.status_code} for {prod['name']}")
-                
-                time.sleep(3)
+                    if not found_price:
+                        price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                        for elem in price_elements:
+                            match = re.search(r'S/\s*([\d.,]+)', elem)
+                            if match:
+                                val_str = match.group(1).replace(',', '')
+                                try:
+                                    val = float(val_str)
+                                    if 20 <= val <= 2000:
+                                        found_price = val
+                                        break
+                                except ValueError:
+                                    continue
             except Exception as e:
-                print(f"Error checking {prod['name']}: {e}")
+                print(f"Error checking Falabella {prod['name']}: {e}")
                 
         if found_price:
             old_price = last_prices.get(prod_id)
@@ -185,6 +202,8 @@ def check_prices():
                 print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
         else:
             print(f"Could not extract price for {prod['name']}")
+            
+        time.sleep(2)
             
     save_last_prices(updated_prices)
 
