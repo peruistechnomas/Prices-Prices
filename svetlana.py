@@ -38,58 +38,40 @@ def save_last_prices(prices):
         json.dump(prices, f, indent=4)
 
 def get_ripley_price_with_browser(url):
-    """Usa un navegador real (Playwright) para extraer el precio de Ripley sin bloqueos."""
+    """Usa un navegador real (Playwright) y busca cualquier coincidencia de precio S/ en la página."""
     found_price = None
     try:
         with sync_playwright() as p:
-            # Lanzar un navegador Chromium en segundo plano (headless)
             browser = p.chromium.launch(headless=True)
             page = browser.new_page(
                 user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
             )
-            page.goto(url, timeout=30000)
+            page.goto(url, timeout=40000)
             
-            # Esperar a que cargue algún elemento de precio en la página
-            try:
-                page.wait_for_selector('.product-price, .internet-price, [class*="price"]', timeout=10000)
-            except Exception:
-                pass # Si no espera el selector exacto, igual leemos el HTML renderizado
+            # Damos unos segundos extra para que carguen los scripts dinámicos de precios de Ripley
+            page.wait_for_timeout(3000)
             
             html_content = page.content()
             browser.close()
             
-            # Buscar el precio en el HTML ya renderizado por el navegador
             soup = BeautifulSoup(html_content, 'html.parser')
             
-            # Buscar en etiquetas comunes de precios de Ripley
-            price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal|card', re.I))
-            for tag in price_tags:
-                match = re.search(r'S/\s*([\d.,]+)', tag.text)
+            # Buscar cualquier texto en la página que tenga el formato de precio peruano "S/" seguido de números
+            price_matches = soup.find_all(string=re.compile(r'S/\s*[\d.,]+'))
+            
+            for text_elem in price_matches:
+                match = re.search(r'S/\s*([\d.,]+)', text_elem)
                 if match:
                     val_str = match.group(1).replace(',', '')
                     try:
                         val = float(val_str)
-                        if 10 <= val <= 2000:
+                        # Filtramos un rango lógico de precios para ropa (entre 15 y 2000 soles)
+                        if 15 <= val <= 2000:
                             found_price = val
                             break
                     except ValueError:
                         continue
-            
-            # Respaldo general si las clases cambiaron
-            if not found_price:
-                all_text = soup.find_all(string=re.compile(r'S/\s*\d+'))
-                for elem in all_text:
-                    match = re.search(r'S/\s*([\d.,]+)', elem)
-                    if match:
-                        val_str = match.group(1).replace(',', '')
-                        try:
-                            val = float(val_str)
-                            if 10 <= val <= 2000:
-                                found_price = val
-                                break
-                        except ValueError:
-                            continue
-                            
+                        
     except Exception as e:
         print(f"Error with Playwright for Ripley: {e}")
         
