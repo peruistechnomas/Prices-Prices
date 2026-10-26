@@ -1,7 +1,6 @@
 import requests
 from bs4 import BeautifulSoup
 
-# Tus credenciales directas de Telegram
 TELEGRAM_TOKEN = "8877774720:AAEvlIkejUrYW1wZNcwf95o0dm_LxWhW0Iw"
 CHAT_ID = "1301227407"
 
@@ -17,6 +16,5 @@ def enviar_alerta(mensaje):
     return response.json()
 
 if __name__ == "__main__":
-    # Mensaje de prueba para verificar la conexión
     enviar_alerta("🤖 ¡Hola! Mensaje de prueba de Svetlana: el bot está activo y conectado con éxito.")
     print("Ejecución completada.")
