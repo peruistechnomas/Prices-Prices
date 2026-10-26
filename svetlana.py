@@ -14,7 +14,8 @@ def send_alert(message):
     payload = {
         "chat_id": CHAT_ID,
         "text": message,
-        "parse_mode": "Markdown"
+        "parse_mode": "Markdown",
+        "disable_web_page_preview": True
     }
     response = requests.post(url, json=payload)
     print(f"Telegram response status: {response.status_code}")
@@ -38,7 +39,8 @@ def save_last_prices(prices):
 def check_prices():
     headers = {
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "es-ES,es;q=0.9"
+        "Accept-Language": "es-ES,es;q=0.9",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
     }
     
     products = [
@@ -86,10 +88,11 @@ def check_prices():
             if response.status_code == 200:
                 soup = BeautifulSoup(response.text, 'html.parser')
                 found_price = None
-                price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
                 
-                for elem in price_elements:
-                    match = re.search(r'S/\s*([\d.,]+)', elem)
+                price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
+                
+                for tag in price_tags:
+                    match = re.search(r'S/\s*([\d.,]+)', tag.text)
                     if match:
                         val_str = match.group(1).replace(',', '')
                         try:
@@ -100,23 +103,44 @@ def check_prices():
                         except ValueError:
                             continue
                 
+                if not found_price:
+                    price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                    for elem in price_elements:
+                        match = re.search(r'S/\s*([\d.,]+)', elem)
+                        if match:
+                            val_str = match.group(1).replace(',', '')
+                            try:
+                                val = float(val_str)
+                                if 20 <= val <= 2000:
+                                    found_price = val
+                                    break
+                            except ValueError:
+                                continue
+                
                 if found_price:
                     old_price = last_prices.get(prod_id)
                     updated_prices[prod_id] = found_price
                     
+                    product_link = f"[Ver producto]({prod['url']})"
+                    
                     if old_price is None:
-                        send_alert(f"🤖 *Svetlana Initialized*\n\n📦 *{prod['name']}*\n💰 Current Price: S/ {found_price:.2f}")
+                        send_alert(
+                            f"Kevin, estos son los precios:\n\n"
+                            f"📦 *{prod['name']}*\n"
+                            f"💰 S/ {found_price:.2f}\n"
+                            f"🔗 {product_link}"
+                        )
                     elif found_price != old_price:
-                        trend = "📉 ¡El precio bajó!" if found_price < old_price else "📈 El precio subió."
+                        trend = "📉 ¡Bajó!" if found_price < old_price else "📈 ¡Subió!"
                         message = (
-                            f"🚨 *¡PRECIO CAMBIÓ!* 🚨\n\n"
-                            f"📦 **Product:** {prod['name']}\n"
-                            f"🔄 **Anterior:** S/ {old_price:.2f}\n"
-                            f"💰 **Nuevo:** S/ {found_price:.2f}\n"
-                            f"{trend}"
+                            f"Kevin, cambiaron los precios:\n\n"
+                            f"📦 *{prod['name']}*\n"
+                            f"🔄 Antes: S/ {old_price:.2f}\n"
+                            f"💰 Ahora: S/ {found_price:.2f} {trend}\n"
+                            f"🔗 {product_link}"
                         )
                         if found_price <= prod['price_limit']:
-                            message += f"\n\n🎯 **¡Límite objetivo alcanzado o superado!**"
+                            message += f"\n\n🎯 *¡Llegó a tu precio objetivo!*"
                         send_alert(message)
                     else:
                         print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
