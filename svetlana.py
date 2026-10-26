@@ -35,13 +35,15 @@ def load_last_prices():
 def save_last_prices(prices):
     """Saves current prices to the local file for future runs."""
     with open(STATE_FILE, "w") as f:
-        json.dump(prices, f, indent=4)
+            json.dump(prices, f, indent=4)
 
 def check_prices():
+    # Cabeceras simulando un navegador real de escritorio con contexto de Perú
     headers = {
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
-        "Accept-Language": "es-ES,es;q=0.9",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
+        "Accept-Language": "es-PE,es;q=0.9,en-US;q=0.8,en;q=0.7",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8",
+        "Referer": "https://simple.ripley.com.pe/"
     }
     
     products = [
@@ -84,49 +86,73 @@ def check_prices():
         prod_id = prod["id"]
         found_price = None
         
-        # Intentamos hasta 2 veces por producto en caso de bloqueos temporales de Ripley
-        for attempt in range(2):
+        for attempt in range(3):
             try:
                 print(f"Checking: {prod['name']} (Attempt {attempt + 1})...")
-                response = requests.get(prod['url'], headers=headers, timeout=15)
+                response = requests.get(prod['url'], headers=headers, timeout=20)
                 
                 if response.status_code == 200:
                     soup = BeautifulSoup(response.text, 'html.parser')
                     
-                    price_tags = soup.find_all(['li', 'div', 'span', 'p'], class_=re.compile(r'price|internet|normal', re.I))
+                    # 1. Búsqueda específica en etiquetas de precios de Ripley (por clases o atributos de precio internet)
+                    # Ripley suele renderizar el precio internet bajo contenedores específicos o scripts incrustados (JSON-LD)
                     
-                    for tag in price_tags:
-                        match = re.search(r'S/\s*([\d.,]+)', tag.text)
+                    # Intentar buscar en scripts JSON-LD de la página (la forma más infalible en e-commerce)
+                    json_scripts = soup.find_all('script', type='application/ld+json')
+                    for script in json_scripts:
+                        try:
+                            data = json.loads(script.string)
+                            if isinstance(data, dict) and 'offers' in data:
+                                offers = data['offers']
+                                if isinstance(offers, dict) and 'price' in offers:
+                                    found_price = float(offers['price'])
+                                    break
+                                elif isinstance(offers, list) and len(offers) > 0 and 'price' in offers[0]:
+                                    found_price = float(offers[0]['price'])
+                                    break
+                        except Exception:
+                            continue
+                    
+                    if found_price:
+                        break
+
+                    # 2. Búsqueda por clases universales de precio en el HTML de Ripley
+                    price_elements = soup.find_all(['span', 'div', 'li'], class_=re.compile(r'product-price|internet|price|value', re.I))
+                    for elem in price_elements:
+                        match = re.search(r'S/\s*([\d.,]+)', elem.text)
                         if match:
                             val_str = match.group(1).replace(',', '')
                             try:
                                 val = float(val_str)
-                                if 20 <= val <= 2000:
+                                if 10 <= val <= 2000:
                                     found_price = val
                                     break
                             except ValueError:
                                 continue
                     
-                    if not found_price:
-                        price_elements = soup.find_all(string=re.compile(r'S/\s*\d+'))
-                        for elem in price_elements:
-                            match = re.search(r'S/\s*([\d.,]+)', elem)
-                            if match:
-                                val_str = match.group(1).replace(',', '')
-                                try:
-                                    val = float(val_str)
-                                    if 20 <= val <= 2000:
-                                        found_price = val
-                                        break
-                                except ValueError:
-                                    continue
-                    
                     if found_price:
-                        break # Si encontró el precio, salimos del bucle de intentos
+                        break
+
+                    # 3. Respaldo general buscando cualquier etiqueta con S/
+                    all_text_prices = soup.find_all(string=re.compile(r'S/\s*\d+'))
+                    for elem in all_text_prices:
+                        match = re.search(r'S/\s*([\d.,]+)', elem)
+                        if match:
+                            val_str = match.group(1).replace(',', '')
+                            try:
+                                val = float(val_str)
+                                if 10 <= val <= 2000:
+                                    found_price = val
+                                    break
+                            except ValueError:
+                                continue
+                                
+                    if found_price:
+                        break
                 else:
                     print(f"HTTP error {response.status_code} for {prod['name']}")
                 
-                time.sleep(2) # Pausa corta entre intentos para evitar bloqueos
+                time.sleep(3)
             except Exception as e:
                 print(f"Error checking {prod['name']}: {e}")
                 
@@ -153,12 +179,12 @@ def check_prices():
                     f"🔗 {product_link}"
                 )
                 if found_price <= prod['price_limit']:
-                    message += f"\n\n🎯 *💍¡Llegó a tu precio objetivo!*"
+                    message += f"\n\n🎯 *¡Llegó a tu precio objetivo!*"
                 send_alert(message)
             else:
                 print(f"No price change for {prod['name']} (S/ {found_price:.2f})")
         else:
-            print(f"Could not extract price for {prod['name']} after attempts")
+            print(f"Could not extract price for {prod['name']}")
             
     save_last_prices(updated_prices)
 
