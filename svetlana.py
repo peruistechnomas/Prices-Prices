@@ -147,13 +147,13 @@ def check_prices():
               diff = current_price - old_price
               if diff < 0:
                 status_msg = (
-                    "🎉 *¡CHOLLAZO / BAJÓ DE PRECIO!* 💸📉\n"
-                    "¡Aprovecha que está más barato!"
+                    "🎉 *¡BAJÓ DE PRECIO, MI KING!* 💸📉\n¡Aprovecha que está"
+                    " más barato!"
                 )
               else:
                 status_msg = (
-                    "⚠️ *¡ALERTA: SUBIÓ DE PRECIO!* 📈🚀\n"
-                    "Se puso un poco más costoso..."
+                    "⚠️ *¡ATENCIÓN MI KING: SUBIÓ DE PRECIO!* 📈🚀\nSe puso un"
+                    " poco más costoso..."
                 )
 
               msg = (
@@ -180,7 +180,6 @@ def check_prices():
     if res.status_code == 200:
       soup_prod = BeautifulSoup(res.text, "html.parser")
 
-      # Selectores directos para la ficha de producto único en Falabella
       title_el = soup_prod.select_one("h1.product-title, span.wy-product-title")
       prod_title = (
           title_el.text.strip()
@@ -208,13 +207,13 @@ def check_prices():
             diff = current_price - old_price
             if diff < 0:
               status_msg = (
-                  "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO FAVORITO!* 💸📉\n"
-                  "¡Es el momento ideal!"
+                  "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO FAVORITO, MI KING!* 💸📉\n¡Es"
+                  " el momento ideal!"
               )
             else:
               status_msg = (
-                  "⚠️ *¡ATENCIÓN: SUBIÓ TU PRODUCTO!* 📈🚀\n"
-                  "Cuidado que encareció."
+                  "⚠️ *¡ATENCIÓN MI KING: SUBIÓ TU PRODUCTO!* 📈🚀\nCuidado que"
+                  " encareció."
               )
 
             msg = (
