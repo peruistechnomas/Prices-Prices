@@ -5,7 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ==========================================
-# 1. ENLACES DE MARCAS Y CATEGORÍAS (Múltiples productos)
+# 1. ENLACES DE MARCAS Y CATEGORÍAS
 # ==========================================
 CATEGORIES_TO_TRACK = [
     {
@@ -33,7 +33,7 @@ TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     "Accept-Language": "es-ES,es;q=0.9",
 }
 
@@ -44,15 +44,23 @@ def load_previous_data():
   if os.path.exists(DATA_FILE):
     try:
       with open(DATA_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
-    except Exception:
+        data = json.load(f)
+        print(f"Memoria cargada. Productos en archivo: {len(data)}")
+        return data
+    except Exception as e:
+      print(f"Error leyendo memoria JSON: {e}")
       return {}
+  print("No hay memoria previa. Se creará una base nueva.")
   return {}
 
 
 def save_current_data(data):
-  with open(DATA_FILE, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=4)
+  try:
+    with open(DATA_FILE, "w", encoding="utf-8") as f:
+      json.dump(data, f, ensure_ascii=False, indent=4)
+    print(f"Memoria guardada con {len(data)} elementos.")
+  except Exception as e:
+    print(f"Error al guardar memoria: {e}")
 
 
 def send_telegram_message(message):
@@ -62,7 +70,11 @@ def send_telegram_message(message):
   url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
   payload = {"chat_id": CHAT_ID, "text": message, "parse_mode": "Markdown"}
   try:
-    requests.post(url, json=payload, timeout=30)
+    res = requests.post(url, json=payload, timeout=30)
+    if res.status_code == 200:
+      print("¡Alerta enviada a Telegram con éxito!")
+    else:
+      print(f"Error de Telegram: {res.text}")
   except Exception as e:
     print(f"Error al enviar mensaje a Telegram: {e}")
 
@@ -87,34 +99,36 @@ def check_prices():
   current_data = {}
 
   # ----------------------------------------------------
-  # PROCESAR CATEGORÍAS Y MARCAS (Múltiples productos)
+  # PROCESAR CATEGORÍAS Y MARCAS
   # ----------------------------------------------------
   for item in CATEGORIES_TO_TRACK:
     item_id_prefix = item["id"]
     item_name = item["name"]
     url = item["url"]
 
-    print(f"Analizando categoría: {item_name}...")
+    print(f"Revisando categoría: {item_name}...")
 
     try:
       response = requests.get(url, headers=HEADERS, timeout=30)
-      if response.status_code != 200:
+      if response.status_count != 200 and response.status_code != 200:
         print(f"Error HTTP {response.status_code} para {item_name}")
         continue
 
       soup = BeautifulSoup(response.text, "html.parser")
+      # Selectores amplios para capturar los bloques de productos en Falabella
       products = soup.select(
-          "div.search-results-item, div.jsx-3243929427, article.pod-item"
+          "div.search-results-item, article.pod-item, div.jsx-3243929427,"
+          " section.pod-list > article"
       )
       if not products:
         products = soup.select(".pod-item")
 
-      print(f"Encontrados {len(products)} productos en {item_name}.")
+      print(f"Se detectaron {len(products)} elementos en {item_name}.")
 
       for index, prod in enumerate(products):
         try:
           title_elem = prod.select_one(
-              "b.pod-subTitle, a.pod-link, .pod-title"
+              "b.pod-subTitle, a.pod-link, .pod-title, h2"
           )
           title = (
               title_elem.text.strip()
@@ -122,11 +136,19 @@ def check_prices():
               else f"Producto {index} - {item_name}"
           )
 
-          link_elem = prod.select_one("a.pod-link")
-          link = link_elem["href"] if link_elem and "href" in link_elem else url
+          link_elem = prod.select_one("a.pod-link, a")
+          link = (
+              link_elem["href"]
+              if link_elem and "href" in link_elem
+              else url
+          )
+          if link.startswith("//"):
+            link = "https:" + link
 
+          # Búsqueda ampliada de precios en listados
           price_elem = prod.select_one(
-              "li.price-0, span.copy-10, .pod-prices .copy-2"
+              "li.price-0, span.copy-10, .pod-prices .copy-2,"
+              " ol.prices-list li span, span.price"
           )
           price_text = price_elem.text if price_elem else None
           current_price = parse_price(price_text)
@@ -166,21 +188,23 @@ def check_prices():
               send_telegram_message(msg)
 
         except Exception as inner_e:
-          print(f"Error procesando producto en categoría: {inner_e}")
+          print(f"Error interno procesando ítem en categoría: {inner_e}")
 
     except Exception as e:
-      print(f"Error técnico conectando a {item_name}: {e}")
+      print(f"Error conectando a {item_name}: {e}")
 
   # ----------------------------------------------------
-  # PROCESAR TU PRODUCTO ESPECÍFICO (Seguimiento directo)
+  # PROCESAR TU PRODUCTO ESPECÍFICO
   # ----------------------------------------------------
-  print(f"Analizando producto específico: {SPECIFIC_PRODUCT['name']}...")
+  print(f"Revisando producto específico: {SPECIFIC_PRODUCT['name']}...")
   try:
     res = requests.get(SPECIFIC_PRODUCT["url"], headers=HEADERS, timeout=30)
     if res.status_code == 200:
       soup_prod = BeautifulSoup(res.text, "html.parser")
 
-      title_el = soup_prod.select_one("h1.product-title, span.wy-product-title")
+      title_el = soup_prod.select_one(
+          "h1.product-title, span.wy-product-title, h1"
+      )
       prod_title = (
           title_el.text.strip()
           if title_el
@@ -188,7 +212,8 @@ def check_prices():
       )
 
       price_el = soup_prod.select_one(
-          "li.price-0, span.copy-10, .product-prices price"
+          "li.price-0, span.copy-10, .product-prices price, span.price,"
+          " .wy-product-price"
       )
       price_text = price_el.text if price_el else None
       current_price = parse_price(price_text)
@@ -224,15 +249,18 @@ def check_prices():
                 f"[🔗 Ver chompa aquí]({SPECIFIC_PRODUCT['url']})"
             )
             send_telegram_message(msg)
+          else:
+            print("El precio de la chompa se mantiene igual en memoria.")
+        else:
+          print("Chompa registrada por primera vez en la memoria actual.")
     else:
-      print(f"Error HTTP al revisar la chompa específica: {res.status_code}")
+      print(f"Error HTTP en chompa específica: {res.status_code}")
   except Exception as e:
     print(f"Error técnico con el producto específico: {e}")
 
-  # Guardar todo en el JSON
   if current_data:
     save_current_data(current_data)
 
 
 if __name__ == "__main__":
-  check_prices()
+    check_prices()
