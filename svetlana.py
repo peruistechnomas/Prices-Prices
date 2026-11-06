@@ -4,9 +4,6 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-# ==========================================
-# LISTA DE PRODUCTOS ESPECÍFICOS A VIGILAR (URLs directas)
-# ==========================================
 PRODUCTS_TO_TRACK = [
     {
         "id": "chompa_estrella_la_martina",
@@ -100,18 +97,47 @@ def send_telegram_message(message):
     print(f"Error al enviar mensaje a Telegram: {e}")
 
 
-def parse_price(price_str):
-  if not price_str:
-    return None
-  clean_str = (
-      price_str.replace("S/", "")
-      .replace("$", "")
-      .replace(",", "")
-      .strip()
-  )
-  match = re.search(r"(\d+(\.\d+)?)", clean_str)
-  if match:
-    return float(match.group(1))
+def extract_price_from_next_data(html):
+  """Busca el estado interno __NEXT_DATA__ o extrae los números de precio en el HTML."""
+  try:
+    match = re.search(
+        r'<script id="__NEXT_DATA__" type="application/json">(.*?)</script>',
+        html,
+        re.DOTALL,
+    )
+    if match:
+      data = json.loads(match.group(1))
+      # Buscar dentro del árbol JSON de Falabella los precios del producto
+      page_props = data.get("props", {}).get("pageProps", {})
+      product_data = page_props.get("productData", {}) or page_props.get(
+          "initialData", {}
+      )
+
+      # Intentar extraer de prices dentro de productData
+      prices = product_data.get("prices", [])
+      if not prices:
+        # Fallback a variantes/skus si existen
+        skus = product_data.get("variants", []) or product_data.get("skus", [])
+        if skus and isinstance(skus, list) and len(skus) > 0:
+          prices = skus[0].get("prices", [])
+
+      for p in prices:
+        price_val = p.get("price", [None])[0] if isinstance(p.get("price"), list) else p.get("price")
+        if price_val:
+          clean_val = str(price_val).replace(",", "").strip()
+          num_match = re.search(r"(\d+(\.\d+)?)", clean_val)
+          if num_match:
+            return float(num_match.group(1))
+
+    # Respaldo vía Expresión Regular directa si Next.js no trae la estructura estándar
+    raw_prices = re.findall(r'"price"\s*:\s*\[?"?\s*(\d+(?:\.\d+)?)"?', html)
+    if raw_prices:
+      valid_prices = [float(p) for p in raw_prices if float(p) > 0]
+      if valid_prices:
+        return min(valid_prices)
+  except Exception as e:
+    print(f"Error en parsing avanzado de precio: {e}")
+
   return None
 
 
@@ -132,20 +158,23 @@ def check_prices():
       if res.status_code == 200:
         soup_prod = BeautifulSoup(res.text, "html.parser")
 
-        title_el = soup_prod.select_one(
-            "h1.product-title, span.wy-product-title, h1"
-        )
+        # Intentar extraer título
+        title_el = soup_prod.select_one("h1")
         title = title_el.text.strip() if title_el else prod_name
 
-        price_el = soup_prod.select_one(
-            "li.price-0, span.copy-10, .product-prices price, span.price,"
-            " .wy-product-price"
-        )
-        price_text = price_el.text if price_el else None
-        print(f"Texto de precio extraído: {price_text}")
+        # Extracción avanzada de precio
+        current_price = extract_price_from_next_data(res.text)
 
-        current_price = parse_price(price_text)
-        print(f"Precio numérico: {current_price}")
+        # Respaldo HTML por selectores visuales clásicos en caso el JSON no responda
+        if not current_price:
+          price_el = soup_prod.select_one("span.copy-10, li.price-0, div.prices-0, [class*='price']")
+          if price_el:
+            clean_str = price_el.text.replace("S/", "").replace("$", "").replace(",", "").strip()
+            num_match = re.search(r"(\d+(\.\d+)?)", clean_str)
+            if num_match:
+              current_price = float(num_match.group(1))
+
+        print(f"Precio extraído: S/ {current_price}")
 
         if current_price:
           current_data[prod_id] = {
@@ -161,15 +190,9 @@ def check_prices():
             if current_price != old_price:
               diff = current_price - old_price
               if diff < 0:
-                status_msg = (
-                    "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO, MI KING!* 💸📉\n¡Es el"
-                    " momento ideal!"
-                )
+                status_msg = "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO, MI KING!* 💸📉\n¡Es el momento ideal!"
               else:
-                status_msg = (
-                    "⚠️ *¡ATENCIÓN MI KING: SUBIÓ DE PRECIO!* 📈🚀\nCuidado que"
-                    " encareció."
-                )
+                status_msg = "⚠️ *¡ATENCIÓN MI KING: SUBIÓ DE PRECIO!* 📈🚀\nCuidado que encareció."
 
               msg = (
                   f"{status_msg}\n\n"
@@ -183,6 +206,8 @@ def check_prices():
               print("El precio se mantiene igual respecto a la memoria.")
           else:
             print("Registrado por primera vez en memoria.")
+        else:
+          print(f"No se pudo determinar el precio para {prod_name}.")
       else:
         print(f"Error HTTP al revisar el producto: {res.status_code}")
     except Exception as e:
