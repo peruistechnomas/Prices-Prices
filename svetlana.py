@@ -110,12 +110,11 @@ def check_prices():
 
     try:
       response = requests.get(url, headers=HEADERS, timeout=30)
-      if response.status_count != 200 and response.status_code != 200:
+      if response.status_code != 200:
         print(f"Error HTTP {response.status_code} para {item_name}")
         continue
 
       soup = BeautifulSoup(response.text, "html.parser")
-      # Selectores amplios para capturar los bloques de productos en Falabella
       products = soup.select(
           "div.search-results-item, article.pod-item, div.jsx-3243929427,"
           " section.pod-list > article"
@@ -145,7 +144,6 @@ def check_prices():
           if link.startswith("//"):
             link = "https:" + link
 
-          # Búsqueda ampliada de precios en listados
           price_elem = prod.select_one(
               "li.price-0, span.copy-10, .pod-prices .copy-2,"
               " ol.prices-list li span, span.price"
@@ -183,7 +181,7 @@ def check_prices():
                   f"📦 *{title}*\n"
                   f"🔄 Antes: S/ {old_price:.2f}\n"
                   f"💲 Ahora: S/ {current_price:.2f}\n"
-                  f"[🔗 Ver producto aquí]({link})"
+                  f"[🔗 Ver producto hier]({link})"
               )
               send_telegram_message(msg)
 
@@ -263,4 +261,4 @@ def check_prices():
 
 
 if __name__ == "__main__":
-    check_prices()
+  check_prices()
