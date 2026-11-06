@@ -5,29 +5,50 @@ import requests
 from bs4 import BeautifulSoup
 
 # ==========================================
-# 1. ENLACES DE MARCAS Y CATEGORÍAS
+# LISTA DE PRODUCTOS ESPECÍFICOS A VIGILAR (URLs directas)
 # ==========================================
-CATEGORIES_TO_TRACK = [
+PRODUCTS_TO_TRACK = [
     {
-        "id": "la_martina_page2",
-        "name": "La Martina (Página 2)",
-        "url": "https://www.falabella.com.pe/falabella-pe/brand/LA%20MARTINA?latLong=%257B%2522latitude%2522%253A%2522-12.086940304221134%2522%252C%2522longitude%2522%253A%2522-76.98159624185517%2522%257D&sortBy=derived.price.search%2Casc&page=2",
+        "id": "chompa_estrella_la_martina",
+        "name": "Chompa Hombre La Martina (Específica)",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414099",
     },
     {
-        "id": "polo_ralph_lauren",
-        "name": "Polo Ralph Lauren",
-        "url": "https://www.falabella.com.pe/falabella-pe/brand/POLO%20RALPH%20LAUREN",
+        "id": "long_sleeve_sweatshirt_80183183",
+        "name": "Long Sleeve Sweatshirt",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/80183114/long-sleeve-sweatshirt/80183183",
+    },
+    {
+        "id": "sweater_top_m_s_ryl_ht_80096202",
+        "name": "Sweater Top M S Ryl Ht",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/80096058/sweater-top-m-s-ryl-ht/80096202",
+    },
+    {
+        "id": "short_sleeve_knit_80172241",
+        "name": "Short Sleeve Knit",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/80172058/short-sleeve-knit/80172241",
+    },
+    {
+        "id": "polo_ralph_lauren_21475966",
+        "name": "Polo Polo Ralph Lauren",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/21436383/polo-polo-ralph-lauren/21475966",
+    },
+    {
+        "id": "classic_sport_cap_80172221",
+        "name": "Classic Sport Cap",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/80172053/classic-sport-cap/80172221",
+    },
+    {
+        "id": "polo_pc_1950_nac_21461140",
+        "name": "Polo PC 1950 Nac",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/21461129/polo-pc-1950-nac/21461140",
+    },
+    {
+        "id": "polo_mc_cuello_pc_kils_lm_883862299",
+        "name": "Polo M C Cuello PC Kils Lm",
+        "url": "https://www.falabella.com.pe/falabella-pe/product/883862295/polo-m-c-cuello-pc-kils-lm/883862299",
     },
 ]
-
-# ==========================================
-# 2. TU PRODUCTO ESPECÍFICO (Seguimiento directo)
-# ==========================================
-SPECIFIC_PRODUCT = {
-    "id": "chompa_estrella_la_martina",
-    "name": "Chompa Hombre La Martina (Específica)",
-    "url": "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414099",
-}
 
 TELEGRAM_TOKEN = os.environ.get("TELEGRAM_TOKEN")
 CHAT_ID = os.environ.get("CHAT_ID")
@@ -98,82 +119,56 @@ def check_prices():
   previous_data = load_previous_data()
   current_data = {}
 
-  # ----------------------------------------------------
-  # PROCESAR CATEGORÍAS Y MARCAS
-  # ----------------------------------------------------
-  for item in CATEGORIES_TO_TRACK:
-    item_id_prefix = item["id"]
-    item_name = item["name"]
-    url = item["url"]
+  for product in PRODUCTS_TO_TRACK:
+    prod_id = product["id"]
+    prod_name = product["name"]
+    prod_url = product["url"]
 
-    print(f"Revisando categoría: {item_name}...")
-
+    print(f"Revisando producto: {prod_name}...")
     try:
-      response = requests.get(url, headers=HEADERS, timeout=30)
-      if response.status_code != 200:
-        print(f"Error HTTP {response.status_code} para {item_name}")
-        continue
+      res = requests.get(prod_url, headers=HEADERS, timeout=30)
+      print(f"Estado HTTP: {res.status_code}")
 
-      soup = BeautifulSoup(response.text, "html.parser")
-      products = soup.select(
-          "div.search-results-item, article.pod-item, div.jsx-3243929427,"
-          " section.pod-list > article"
-      )
-      if not products:
-        products = soup.select(".pod-item")
+      if res.status_code == 200:
+        soup_prod = BeautifulSoup(res.text, "html.parser")
 
-      print(f"Se detectaron {len(products)} elementos en {item_name}.")
+        title_el = soup_prod.select_one(
+            "h1.product-title, span.wy-product-title, h1"
+        )
+        title = title_el.text.strip() if title_el else prod_name
 
-      for index, prod in enumerate(products):
-        try:
-          title_elem = prod.select_one(
-              "b.pod-subTitle, a.pod-link, .pod-title, h2"
-          )
-          title = (
-              title_elem.text.strip()
-              if title_elem
-              else f"Producto {index} - {item_name}"
-          )
+        price_el = soup_prod.select_one(
+            "li.price-0, span.copy-10, .product-prices price, span.price,"
+            " .wy-product-price"
+        )
+        price_text = price_el.text if price_el else None
+        print(f"Texto de precio extraído: {price_text}")
 
-          link_elem = prod.select_one("a.pod-link, a")
-          link = (
-              link_elem["href"]
-              if link_elem and "href" in link_elem
-              else url
-          )
-          if link.startswith("//"):
-            link = "https:" + link
+        current_price = parse_price(price_text)
+        print(f"Precio numérico: {current_price}")
 
-          price_elem = prod.select_one(
-              "li.price-0, span.copy-10, .pod-prices .copy-2,"
-              " ol.prices-list li span, span.price"
-          )
-          price_text = price_elem.text if price_elem else None
-          current_price = parse_price(price_text)
-
-          if not current_price:
-            continue
-
-          unique_key = f"{item_id_prefix}_{index}"
-          current_data[unique_key] = {
+        if current_price:
+          current_data[prod_id] = {
               "name": title,
               "price": current_price,
-              "link": link,
+              "link": prod_url,
           }
 
-          if unique_key in previous_data:
-            old_price = previous_data[unique_key]["price"]
+          if prod_id in previous_data:
+            old_price = previous_data[prod_id]["price"]
+            print(f"Precio anterior: {old_price} | Precio actual: {current_price}")
+
             if current_price != old_price:
               diff = current_price - old_price
               if diff < 0:
                 status_msg = (
-                    "🎉 *¡BAJÓ DE PRECIO, MI KING!* 💸📉\n¡Aprovecha que está"
-                    " más barato!"
+                    "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO, MI KING!* 💸📉\n¡Es el"
+                    " momento ideal!"
                 )
               else:
                 status_msg = (
-                    "⚠️ *¡ATENCIÓN MI KING: SUBIÓ DE PRECIO!* 📈🚀\nSe puso un"
-                    " poco más costoso..."
+                    "⚠️ *¡ATENCIÓN MI KING: SUBIÓ DE PRECIO!* 📈🚀\nCuidado que"
+                    " encareció."
                 )
 
               msg = (
@@ -181,80 +176,17 @@ def check_prices():
                   f"📦 *{title}*\n"
                   f"🔄 Antes: S/ {old_price:.2f}\n"
                   f"💲 Ahora: S/ {current_price:.2f}\n"
-                  f"[🔗 Ver producto hier]({link})"
+                  f"[🔗 Ver producto aquí]({prod_url})"
               )
               send_telegram_message(msg)
-
-        except Exception as inner_e:
-          print(f"Error interno procesando ítem en categoría: {inner_e}")
-
-    except Exception as e:
-      print(f"Error conectando a {item_name}: {e}")
-
-  # ----------------------------------------------------
-  # PROCESAR TU PRODUCTO ESPECÍFICO
-  # ----------------------------------------------------
-  print(f"Revisando producto específico: {SPECIFIC_PRODUCT['name']}...")
-  try:
-    res = requests.get(SPECIFIC_PRODUCT["url"], headers=HEADERS, timeout=30)
-    if res.status_code == 200:
-      soup_prod = BeautifulSoup(res.text, "html.parser")
-
-      title_el = soup_prod.select_one(
-          "h1.product-title, span.wy-product-title, h1"
-      )
-      prod_title = (
-          title_el.text.strip()
-          if title_el
-          else SPECIFIC_PRODUCT["name"]
-      )
-
-      price_el = soup_prod.select_one(
-          "li.price-0, span.copy-10, .product-prices price, span.price,"
-          " .wy-product-price"
-      )
-      price_text = price_el.text if price_el else None
-      current_price = parse_price(price_text)
-
-      if current_price:
-        unique_key = SPECIFIC_PRODUCT["id"]
-        current_data[unique_key] = {
-            "name": prod_title,
-            "price": current_price,
-            "link": SPECIFIC_PRODUCT["url"],
-        }
-
-        if unique_key in previous_data:
-          old_price = previous_data[unique_key]["price"]
-          if current_price != old_price:
-            diff = current_price - old_price
-            if diff < 0:
-              status_msg = (
-                  "🎉 *¡BAJÓ DE PRECIO TU PRODUCTO FAVORITO, MI KING!* 💸📉\n¡Es"
-                  " el momento ideal!"
-              )
             else:
-              status_msg = (
-                  "⚠️ *¡ATENCIÓN MI KING: SUBIÓ TU PRODUCTO!* 📈🚀\nCuidado que"
-                  " encareció."
-              )
-
-            msg = (
-                f"{status_msg}\n\n"
-                f"📦 *{prod_title}*\n"
-                f"🔄 Antes: S/ {old_price:.2f}\n"
-                f"💲 Ahora: S/ {current_price:.2f}\n"
-                f"[🔗 Ver chompa aquí]({SPECIFIC_PRODUCT['url']})"
-            )
-            send_telegram_message(msg)
+              print("El precio se mantiene igual respecto a la memoria.")
           else:
-            print("El precio de la chompa se mantiene igual en memoria.")
-        else:
-          print("Chompa registrada por primera vez en la memoria actual.")
-    else:
-      print(f"Error HTTP en chompa específica: {res.status_code}")
-  except Exception as e:
-    print(f"Error técnico con el producto específico: {e}")
+            print("Registrado por primera vez en memoria.")
+      else:
+        print(f"Error HTTP al revisar el producto: {res.status_code}")
+    except Exception as e:
+      print(f"Error técnico con el producto {prod_name}: {e}")
 
   if current_data:
     save_current_data(current_data)
