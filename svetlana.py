@@ -1,7 +1,7 @@
 import os
 import json
 import requests
-from bs4얀 import BeautifulSoup
+from bs4 import BeautifulSoup
 
 # Lista definitiva de los 8 productos en Falabella
 URLS = [
@@ -67,22 +67,18 @@ def check_prices():
 
             data = json.loads(next_data.string)
             
-            # Extracción segura a través del árbol JSON de Falabella
             product_data = data.get("props", {}).get("pageProps", {}).get("product", {})
             name = product_data.get("name", "Producto sin nombre")
             
-            # Buscar precios en las variantes o bloques de precios
             prices_list = product_data.get("prices", [])
             current_price = None
             for p in prices_list:
-                # Buscamos el precio internet u oferta principal
                 if p.get("type") in ["NORMAL", "INTERNET", "OFFER"]:
                     current_price = p.get("price", [None])[0]
                     if current_price:
                         break
             
             if not current_price:
-                # Fallback genérico si la estructura varía
                 current_price = product_data.get("currentPrice") or "Precio no disponible"
 
             current_prices[url] = {
@@ -90,7 +86,6 @@ def check_prices():
                 "price": current_price
             }
 
-            # Lógica de comparación y alerta si baja el precio
             old_entry = previous_prices.get(url)
             if old_entry and old_entry.get("price") != current_price:
                 old_val = old_entry.get("price")
