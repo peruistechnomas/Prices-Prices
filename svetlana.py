@@ -4,16 +4,16 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-# Tus 8 URLs de productos de Falabella
+# Tus 8 enlaces exactos y completos de Falabella
 URLS = [
-    "https://www.falabella.com.pe/falabella-pe/product/2141...",
-    "https://www.falabella.com.pe/falabella-pe/product/8018...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/2106...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
+    "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414096",
+    "https://www.falabella.com.pe/falabella-pe/product/80172075/knit-polo/80172304",
+    "https://www.falabella.com.pe/falabella-pe/product/80172058/short-sleeve-knit/80172242",
+    "https://www.falabella.com.pe/falabella-pe/product/21062272/camisa-negro-s/80145407",
+    "https://www.falabella.com.pe/falabella-pe/product/80183114/long-sleeve-sweatshirt/80183183",
+    "https://www.falabella.com.pe/falabella-pe/product/20814027/polo-mc-cuello-office-blue-c1750-s/20814031",
+    "https://www.falabella.com.pe/falabella-pe/product/80172053/classic-sport-cap/80172221",
+    "https://www.falabella.com.pe/falabella-pe/product/21495609/sskccmslm1-shor/21495613",
 ]
 
 DATA_FILE = "last_prices.json"
@@ -53,7 +53,7 @@ def get_product_info(url):
     if response.status_code == 200:
       data = response.json()
       name = data.get("name") or data.get("productName")
-      
+
       price = None
       prices_list = data.get("prices", [])
       for p in prices_list:
@@ -74,12 +74,26 @@ def get_product_info(url):
     response = requests.get(url, headers=headers, timeout=15)
     if response.status_code == 200:
       soup = BeautifulSoup(response.text, "html.parser")
-      
-      name_tag = soup.find("h1", {"class": lambda x: x and "product" in x.lower()}) or soup.find("h1")
-      name = name_tag.get_text(strip=True) if name_tag else "Producto sin nombre"
 
-      price_tag = soup.find("span", {"class": lambda x: x and ("price" in x.lower() or "copy" in x.lower())})
-      price = price_tag.get_text(strip=True) if price_tag else "Precio no disponible"
+      name_tag = soup.find(
+          "h1", {"class": lambda x: x and "product" in x.lower()}
+      ) or soup.find("h1")
+      name = (
+          name_tag.get_text(strip=True) if name_tag else "Producto sin nombre"
+      )
+
+      price_tag = soup.find(
+          "span",
+          {
+              "class": lambda x: x
+              and ("price" in x.lower() or "copy" in x.lower())
+          },
+      )
+      price = (
+          price_tag.get_text(strip=True)
+          if price_tag
+          else "Precio no disponible"
+      )
 
       return name, price
   except Exception:
