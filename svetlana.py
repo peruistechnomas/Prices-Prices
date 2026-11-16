@@ -1,113 +1,111 @@
 import json
 import os
+import re
 import requests
-from bs4 import BeautifulSoup
 
-# Lista de tus productos a monitorear
+# Tus URLs de productos de Falabella
 URLS = [
-    "https://www.falabella.com.pe/falabella-pe/product/2141...",  # Reemplaza con tus URLs reales si es necesario
+    "https://www.falabella.com.pe/falabella-pe/product/2141...",
     "https://www.falabella.com.pe/falabella-pe/product/8018...",
     "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
     "https://www.falabella.com.pe/falabella-pe/product/2106...",
-    "https://www.falabella.com.pe/falabella-pe/product/8017...",
 ]
 
 DATA_FILE = "last_prices.json"
 
 
+def extract_sku(url):
+  # Extrae el número de SKU o ID del producto que está al final de la URL de Falabella
+  match = re.search(r"/product/(\d+)", url)
+  if match:
+    return match.group(1)
+  # Si el formato usa guiones al final (ej: /12345678)
+  parts = url.strip("/").split("/")
+  for part in parts:
+    if part.isdigit() and len(part) > 5:
+      return part
+  return None
+
+
 def get_product_info(url):
+  sku = extract_sku(url)
+  if not sku:
+    return "Producto sin nombre", "Precio no disponible"
+
+  # Cabeceras simulando un navegador real muy específico
   headers = {
       "User-Agent": (
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML,"
           " like Gecko) Chrome/122.0.0.0 Safari/537.36"
       ),
+      "Accept": "application/json, text/plain, */*",
       "Accept-Language": "es-PE,es;q=0.9",
-      "Accept": (
-          "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8"
-      ),
+      "Referer": url,
+      "Origin": "https://www.falabella.com.pe",
   }
 
+  # Intento 1: Consultar mediante la API pública de productos de Falabella usando el SKU
+  api_url = (
+      f"https://www.falabella.com.pe/s/product/v1/pe/product/{sku}"
+  )
+  try:
+    response = requests.get(api_url, headers=headers, timeout=10)
+    if response.status_code == 200:
+      data = response.json()
+      # Extraer nombre y precio desde la respuesta de la API
+      name = data.get("name") or data.get("productName")
+      
+      # Buscar el precio dentro de las estructuras habituales de la API
+      price = None
+      prices_list = data.get("prices", [])
+      for p in prices_list:
+        if "formattedValue" in p:
+          price = p["formattedValue"]
+          break
+        elif "price" in p:
+          price = str(p["price"])
+          break
+
+      if name and price:
+        return name, price
+  except Exception:
+    pass
+
+  # Intento 2 (Respaldo): Petición directa a la página web con cabeceras de navegador
   try:
     response = requests.get(url, headers=headers, timeout=15)
-    if response.status_code != 200:
-      return "Producto sin nombre", "Precio no disponible"
+    if response.status_code == 200:
+      from bs4import BeautifulSoup
 
-    soup = BeautifulSoup(response.text, "html.parser")
-    name = "Producto sin nombre"
-    price = "Precio no disponible"
+      soup = BeautifulSoup(response.text, "html.parser")
+      
+      # Buscar título
+      name_tag = soup.find("h1", {"class": lambda x: x and "product" in x.lower()}) or soup.find("h1")
+      name = name_tag.get_text(strip=True) if name_tag else "Producto sin nombre"
 
-    # Método 1: Buscar en el JSON interno __NEXT_DATA__ (la forma más precisa en Falabella)
-    script_tag = soup.find("script", id="__NEXT_DATA__")
-    if script_tag:
-      try:
-        json_data = json.loads(script_tag.string)
-        # Navegamos por la estructura típica de Next.js de Falabella
-        # (Esto puede variar según el diseño exacto de la API de la tienda)
-        product_info = (
-            json_data.get("props", {})
-            .get("pageProps", {})
-            .get("product", {})
-        )
-        if product_info:
-          name = product_info.get("name", "Producto sin nombre")
-          # Buscar precios en las variantes o bloques de precios
-          prices = product_info.get("prices", [])
-          if prices:
-            # Intenta capturar el precio normal o de oferta
-            price = str(prices[0].get("price", [p.get("formattedValue") for p in prices][0] if prices else "Precio no disponible"))
-        # Si no lo halló directo, buscamos de forma genérica en el JSON
-        if name == "Producto sin nombre":
-          # Fallback de texto con BeautifulSoup si el JSON falla en esta capa
-          pass
-      except Exception:
-        pass
+      # Buscar precio en clases comunes de Falabella
+      price_tag = soup.find("span", {"class": lambda x: x and ("price" in x.lower() or "copy" in x.lower())})
+      price = price_tag.get_text(strip=True) if price_tag else "Precio no disponible"
 
-    # Método 2: Respaldo buscando etiquetas HTML comunes si el JSON no dio el precio
-    if price == "Precio no disponible":
-      # Buscar título en etiquetas h1 o meta tags
-      h1_tag = soup.find("h1")
-      if h1_tag:
-        name = h1_tag.get_text(strip=True)
+      return name, price
+  except Exception:
+    pass
 
-      # Buscar clases comunes de precio en Falabella Perú
-      price_tag = soup.find("span", {"class": lambda x: x and "prices" in x.lower()}) or \
-                  soup.find("li", {"class": lambda x: x and "price" in x.lower()})
-      if price_tag:
-        price = price_tag.get_text(strip=True)
-
-    return name, price
-
-  except Exception as e:
-    print(f"Error al conectar con {url}: {e}")
-    return "Producto sin nombre", "Precio no disponible"
+  return "Producto sin nombre", "Precio no disponible"
 
 
 def main():
   current_prices = {}
 
-  # Cargar precios anteriores si existen
-  old_prices = {}
-  if os.path.exists(DATA_FILE):
-    try:
-      with open(DATA_FILE, "r", encoding="utf-8") as f:
-        old_prices = json.load(f)
-    except Exception:
-      old_prices = {}
-
-  # Analizar cada URL
   for url in URLS:
-    print(f"Consultando: {url}")
+    print(f"Consultando SKU para: {url}")
     name, price = get_product_info(url)
     current_prices[url] = {"name": name, "price": price}
 
-  # Guardar los nuevos precios en el archivo JSON
   with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(current_prices, f, ensure_ascii=False, indent=4)
 
-  print("Archivo last_prices.json actualizado correctamente.")
+  print("Archivo last_prices.json actualizado con éxito mediante API.")
 
 
 if __name__ == "__main__":
