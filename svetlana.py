@@ -4,7 +4,7 @@ import re
 import requests
 from bs4 import BeautifulSoup
 
-# Tus 8 enlaces exactos y completos de Falabella
+# Tus 8 enlaces exactos de Falabella
 URLS = [
     "https://www.falabella.com.pe/falabella-pe/product/21414094/chompa-hombre-la-martina/21414096",
     "https://www.falabella.com.pe/falabella-pe/product/80172075/knit-polo/80172304",
@@ -18,6 +18,24 @@ URLS = [
 
 DATA_FILE = "last_prices.json"
 
+# Credenciales de tu Bot de Telegram
+TELEGRAM_TOKEN = "8877774720:AAGZDgSvjTDU1veqxA1wsrHxDSM3J5QC37M"
+CHAT_ID = "1301227407"
+
+
+def send_telegram_message(message):
+  """Envía una alerta directa a tu Telegram"""
+  url = f"https://api.telegram.org/bot{TELEGRAM_TOKEN}/sendMessage"
+  payload = {
+      "chat_id": CHAT_ID,
+      "text": message,
+      "parse_mode": "Markdown",
+  }
+  try:
+    requests.post(url, json=payload, timeout=10)
+  except Exception as e:
+    print(f"Error al enviar mensaje de Telegram: {e}")
+
 
 def extract_sku(url):
   match = re.search(r"/product/(\d+)", url)
@@ -28,6 +46,22 @@ def extract_sku(url):
     if part.isdigit() and len(part) > 5:
       return part
   return None
+
+
+def clean_price(price_str):
+  """Convierte un string de precio a float para poder compararlos"""
+  if not price_str or "no disponible" in price_str.lower():
+    return None
+  try:
+    clean = (
+        price_str.replace("S/", "")
+        .replace("S/.", "")
+        .replace(",", "")
+        .strip()
+    )
+    return float(clean)
+  except ValueError:
+    return None
 
 
 def get_product_info(url):
@@ -103,17 +137,54 @@ def get_product_info(url):
 
 
 def main():
+  old_prices = {}
+  if os.path.exists(DATA_FILE):
+    try:
+      with open(DATA_FILE, "r", encoding="utf-8") as f:
+        old_prices = json.load(f)
+    except Exception:
+      pass
+
   current_prices = {}
 
+  print("=== INICIANDO VERIFICACIÓN DE PRECIOS ===")
+
   for url in URLS:
-    print(f"Consultando producto: {url}")
+    print(f"Consultando: {url}")
     name, price = get_product_info(url)
     current_prices[url] = {"name": name, "price": price}
 
+    if url in old_prices:
+      old_price_str = old_prices[url].get("price")
+      old_val = clean_price(old_price_str)
+      new_val = clean_price(price)
+
+      if old_val and new_val:
+        if new_val < old_val:
+          # ¡Alerta de rebaja! Preparamos y enviamos el mensaje a Telegram
+          msg = (
+              f"📉 *¡BAJÓ DE PRECIO EN FALABELLA!*\n\n"
+              f"👕 *Producto:* {name}\n"
+              f"💰 *Precio anterior:* {old_price_str}\n"
+              f"🔥 *Precio nuevo:* {price}\n\n"
+              f"[Ver producto en Falabella]({url})"
+          )
+          print(f"¡Rebaja detectada en {name}! Enviando alerta a Telegram...")
+          send_telegram_message(msg)
+        elif new_val > old_val:
+          print(f"   [Subió] {name} pasó de {old_price_str} a {price}")
+        else:
+          print(f"   [Sin cambios] {price}")
+      else:
+        print(f"   [Actual] {price}")
+    else:
+      print(f"   [Nuevo registro] {price}")
+
+  # Guardar los precios actualizados
   with open(DATA_FILE, "w", encoding="utf-8") as f:
     json.dump(current_prices, f, ensure_ascii=False, indent=4)
 
-  print("Archivo last_prices.json actualizado correctamente.")
+  print("\n✅ Verificación completada.")
 
 
 if __name__ == "__main__":
